@@ -1,0 +1,29 @@
+# Core dependencies
+langgraph
+langchain
+langchain-openai
+langchain-anthropic
+pydantic
+supabase
+python-dotenv
+fastapi
+uvicorn
+
+
+# Observability and monitoring
+langsmith
+langfuse
+
+# Text processing and utilities
+tiktoken
+openai
+anthropic
+langchain-google-genai
+
+# Additional utilities
+python-multipart
+httpx
+validators
+
+# WhatsApp Integration
+twilio
