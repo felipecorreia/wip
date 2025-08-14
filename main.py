@@ -3,8 +3,8 @@ import logging
 import time
 import asyncio
 from typing import Any
-from fastapi import FastAPI, Request, HTTPException, Depends, BackgroundTasks
-from fastapi.responses import Response  # Mudança aqui: usar Response ao invés de PlainTextResponse
+from fastapi import FastAPI, Request, HTTPException, Depends, BackgroundTasks, Form
+from fastapi.responses import Response 
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
@@ -15,7 +15,8 @@ load_dotenv()
 # Imports locais
 from src.schemas import EstadoConversa, MensagemWhatsApp, RespostaTwiML
 from src.database import SupabaseManager
-from src.flow import processar_fluxo_artista, reiniciar_conversa, obter_progresso_conversa
+from src.flow import processar_fluxo_artista
+from src.conversation_utils import reiniciar_conversa, obter_progresso_conversa
 from src.flow_direct import processar_mensagem_otimizado
 from src.utils import obter_twilio_manager
 from src.observability import (
@@ -486,24 +487,31 @@ async def llm_status():
 # Endpoint para testes (remover em produção)
 @app.post("/test/message")
 async def test_message(
-    telefone: str,
-    mensagem: str,
+    # Diga explicitamente ao FastAPI para esperar 'telefone' e 'mensagem'
+    # como campos de um formulário no corpo da requisição.
+    telefone: str = Form(...),
+    mensagem: str = Form(...),
     supabase: SupabaseManager = Depends(obter_supabase)
 ):
     """Endpoint para testar processamento de mensagens"""
     try:
+        # O resto da função não precisa de nenhuma alteração
         estado = obter_estado_conversa(telefone, supabase)
-        resposta = await processar_fluxo_artista(telefone, mensagem, estado, supabase)
+        # A sua chamada para processar_fluxo_artista foi removida no refactoring do flow.py
+        # Vamos usar a função correta que está no seu webhook, a processar_mensagem_otimizado
+        # ou a processar_fluxo_artista se quiser testar o LangGraph diretamente.
+        # Vamos usar processar_fluxo_artista para forçar o teste do LangGraph.
+        resposta = await processar_fluxo_artista(telefone, mensagem, estado)
         salvar_estado_conversa(telefone, estado, supabase)
         
         return {
             "telefone": telefone,
             "mensagem_enviada": mensagem,
             "resposta_bot": resposta,
-            "estado_atual": estado.dict()
+            "estado_atual": estado.model_dump() # Usando o método atualizado do Pydantic
         }
     except Exception as e:
-        logger.error(f"Erro no teste de mensagem: {str(e)}")
+        logger.error(f"Erro no teste de mensagem: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

@@ -123,3 +123,22 @@ class DadosExtraidos(BaseModel):
         if v is not None and (v < 0 or v > 50):
             raise ValueError("Experiência deve estar entre 0 e 50 anos")
         return v
+    
+
+
+class DadosExtraidos(BaseModel):
+    """Schema para os dados estruturados extraídos pelo LLM a partir da mensagem do usuário."""
+    nome: Optional[str] = Field(None, description="Nome da banda ou do artista solo.")
+    cidade: Optional[str] = Field(None, description="Cidade de origem da banda ou artista.")
+    estilo_musical: Optional[str] = Field(None, description="Gênero ou estilo musical principal.")
+    instagram: Optional[str] = Field(None, description="Link completo ou @username do perfil do Instagram.")
+    youtube: Optional[str] = Field(None, description="Link completo do canal ou de um vídeo no YouTube.")
+    spotify: Optional[str] = Field(None, description="Link completo do perfil do artista no Spotify.")
+
+    # Validador para normalizar o @username do instagram para uma URL completa
+    @validator('instagram')
+    def formatar_instagram_url(cls, v):
+        if v and not v.startswith('http' ):
+            username = v.replace('@', '').strip()
+            return f"https://instagram.com/{username}"
+        return v

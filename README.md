@@ -1,30 +1,42 @@
 # WIP Artista Bot
 
-Sistema completo de cadastro de artistas via WhatsApp para a **Cervejaria Bragantina** usando IA avançada e fluxos otimizados.
+## O Assistente de Curadoria Inteligente
 
-## Recursos
+O WIP Artista Bot é um sistema de onboarding conversacional para artistas, construído para a **Cervejaria Bragantina**. Utilizando IA avançada, o bot cria um fluxo de cadastro natural e inteligente via WhatsApp, abandonando os formulários rígidos em favor de um diálogo fluido.
 
-- **LLM com Fallback**: OpenAI → Anthropic → Gemini (sistema robusto de fallback)
-- **Fluxo Híbrido**: Resposta instantânea para usuários existentes + LangGraph para novos cadastros
-- **WhatsApp Nativo**: Integração direta via Twilio com timeout otimizado
-- **Menu Inteligente**: Detecção de intenção por palavras-chave para respostas sub-segundo
-- **Banco Multi-tenant**: Supabase com suporte completo à Cervejaria Bragantina
-- **Observabilidade**: LangSmith para traces completos e debugging
-- **Validação Rigorosa**: Schemas Pydantic com tratamento robusto de erros
-- **Performance Otimizada**: Sistema de timeout adaptativo e processamento assíncrono
+O objetivo é simples: tratar o artista com a atenção que ele merece, enquanto otimiza o processo de curadoria para a casa de shows.
 
-## Instalação
+---
 
-### 1. Clonar e Configurar Ambiente
+## Destaques da Arquitetura
 
+-   **🧠 Extração de Dados com LLM**: O coração do bot. Em vez de um roteiro fixo, ele usa um LLM (com fallback entre OpenAI, Anthropic e Gemini) para entender e extrair informações de uma conversa em linguagem natural.
+-   **⛓️ Orquestração com LangGraph**: O fluxo da conversa é gerenciado por um grafo de estados, permitindo lidar com diálogos complexos, parciais e não lineares. O grafo possui mecanismos de prevenção de loops para garantir robustez.
+-   **⚡ Fluxo Híbrido Otimizado**: Respostas instantâneas para usuários já conhecidos e um fluxo de IA completo para novos cadastros, otimizando a experiência e a performance.
+-   **📱 Integração Nativa com WhatsApp**: Conexão direta via Twilio, com timeouts adaptativos para garantir respostas dentro da janela da plataforma.
+-   **🏢 Banco de Dados Multi-tenant**: Arquitetura no Supabase pronta para escalar para outras casas de show, com suporte completo à Cervejaria Bragantina.
+-   **🔭 Observabilidade de Ponta a Ponta**: Traces detalhados de cada conversa no LangSmith para depuração, análise de performance e monitoramento da qualidade dos dados extraídos.
+-   **🛡️ Validação e Robustez**: Uso de schemas Pydantic para garantir a integridade dos dados em todas as etapas do fluxo, desde a extração pelo LLM até a inserção no banco de dados.
+
+---
+
+## Instalação e Execução
+
+### 1. Pré-requisitos
+-   Python 3.11+
+-   Conta no Supabase, Twilio, LangSmith e em pelo menos um provedor de LLM (OpenAI, Anthropic, Google).
+
+### 2. Configuração do Ambiente
 ```bash
-git clone <repository-url>
-cd wip-artista-bot
+# Clone o repositório
+git clone https://github.com/felipecorreia/wip.git
+cd wip
 
-# Ativar ambiente virtual (já criado)
+# Crie e ative o ambiente virtual
+python -m venv .venv
 source .venv/bin/activate
 
-# Instalar dependências
+# Instale as dependências
 pip install -r requirements.txt
 ```
 
@@ -100,17 +112,6 @@ LANGCHAIN_PROJECT=wip-artista-bot
 TWILIO_ACCOUNT_SID=AC...
 TWILIO_AUTH_TOKEN=...
 TWILIO_WHATSAPP_FROM=whatsapp:+14155238886
-```
-
-```sql
--- Executar no Supabase SQL Editor
-INSERT INTO tenants (id, nome, cidade, telefone)
-VALUES (
-    'b2894499-6bf5-4e91-8853-fa16c59ddf40',
-    'Cervejaria Bragantina', 
-    'Bragança Paulista',
-    '+55 11 99999-8888'
-);
 ```
 
 ## Uso
@@ -193,16 +194,15 @@ pytest tests/test_llm.py -v
 ### Estrutura do Projeto
 
 ```
-wip-artista-bot/
+wip/
 ├── src/
-│   ├── schemas.py          # Modelos Pydantic
-│   ├── database.py         # Conexão Supabase  
-│   ├── llm_config.py      # Configuração LLM com fallback
-│   ├── flow.py            # Fluxo LangGraph original
-│   ├── flow_direct.py     # Fluxo otimizado para usuários existentes
-│   ├── flow_new_user.py   # Fluxo simplificado para novos usuários
-│   ├── flow_update.py     # Fluxo específico para atualização de dados
-│   ├── observability.py   # LangSmith e métricas
+│   ├── schemas.py          # Modelos Pydantic (incluindo DadosExtraidos para o LLM)
+│   ├── database.py         # Gerenciador do Supabase
+│   ├── llm_config.py       # Configuração dos LLMs com lógica de fallback
+│   ├── llm_extractor.py    # Função de extração de dados com LLM
+│   ├── flow.py             # Lógica principal do fluxo com LangGraph
+│   ├── conversation_utils.py # Funções auxiliares (reiniciar, status)
+│   ├── observability.py    # Configuração do LangSmith
 │   ├── queue_manager.py   # Processamento assíncrono
 │   └── utils.py           # Funções auxiliares
 ├── tests/                  # Testes unitários
