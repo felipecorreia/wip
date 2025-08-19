@@ -120,6 +120,8 @@ cython_debug/
 
 # Claude AI
 .claude/
+docs/
+req/
 
 # Project specific - Temporary files
 test_*.py

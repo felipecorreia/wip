@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 def verificar_tabelas():
     """Verifica se as tabelas necessárias existem no Supabase"""
-    print("🔍 Verificando estrutura do banco de dados...")
+    print("Verificando estrutura do banco de dados...")
     
     try:
         supabase = SupabaseManager()
@@ -43,27 +43,27 @@ def verificar_tabelas():
                 # Tentar fazer uma query simples para verificar se a tabela existe
                 result = supabase.supabase.table(tabela).select("*").limit(1).execute()
                 tabelas_existentes.append(tabela)
-                print(f"✅ Tabela '{tabela}' encontrada")
+                print(f" Tabela '{tabela}' encontrada")
             except Exception as e:
                 tabelas_faltantes.append(tabela)
-                print(f"❌ Tabela '{tabela}' não encontrada: {str(e)}")
+                print(f" Tabela '{tabela}' não encontrada: {str(e)}")
         
         if tabelas_faltantes:
-            print(f"\n⚠️  Tabelas faltantes: {', '.join(tabelas_faltantes)}")
+            print(f"\n  Tabelas faltantes: {', '.join(tabelas_faltantes)}")
             print("Execute o script SQL de criação das tabelas primeiro.")
             return False
         else:
-            print(f"\n✅ Todas as {len(tabelas_existentes)} tabelas necessárias estão presentes")
+            print(f"\n Todas as {len(tabelas_existentes)} tabelas necessárias estão presentes")
             return True
             
     except Exception as e:
-        print(f"❌ Erro ao conectar com o banco: {str(e)}")
+        print(f" Erro ao conectar com o banco: {str(e)}")
         return False
 
 
 def testar_operacoes_basicas():
     """Testa operações básicas de CRUD"""
-    print("\n🧪 Testando operações básicas...")
+    print("\n Testando operações básicas...")
     
     try:
         supabase = SupabaseManager()
@@ -82,7 +82,7 @@ def testar_operacoes_basicas():
         # Inserir
         result = supabase.supabase.table("estados_conversa").insert(estado_data).execute()
         if result.data:
-            print("✅ Operação de INSERT funcionando")
+            print(" Operação de INSERT funcionando")
             
             # Buscar
             search_result = supabase.supabase.table("estados_conversa")\
@@ -91,7 +91,7 @@ def testar_operacoes_basicas():
                 .execute()
             
             if search_result.data:
-                print("✅ Operação de SELECT funcionando")
+                print(" Operação de SELECT funcionando")
                 
                 # Limpar dados de teste
                 delete_result = supabase.supabase.table("estados_conversa")\
@@ -100,23 +100,23 @@ def testar_operacoes_basicas():
                     .execute()
                 
                 if delete_result:
-                    print("✅ Operação de DELETE funcionando")
+                    print(" Operação de DELETE funcionando")
                     return True
         
-        print("❌ Algumas operações básicas falharam")
+        print(" Algumas operações básicas falharam")
         return False
         
     except Exception as e:
-        print(f"❌ Erro nas operações básicas: {str(e)}")
+        print(f" Erro nas operações básicas: {str(e)}")
         return False
 
 
 def verificar_indices():
     """Verifica se índices importantes estão criados"""
-    print("\n📊 Verificando índices e performance...")
+    print("\n Verificando índices e performance...")
     
     # Para este MVP, apenas logar que a verificação deveria ser feita
-    print("ℹ️  Para produção, considere criar índices em:")
+    print("ℹ Para produção, considere criar índices em:")
     print("   - contatos_artistas.valor (busca por telefone)")
     print("   - conversas.artista_id (histórico de conversas)")
     print("   - estados_conversa.telefone_hash (estado da conversa)")
@@ -127,8 +127,8 @@ def verificar_indices():
 
 def configurar_rls():
     """Informações sobre Row Level Security"""
-    print("\n🔒 Row Level Security (RLS):")
-    print("ℹ️  Para produção, configure políticas RLS em:")
+    print("\n Row Level Security (RLS):")
+    print("  Para produção, configure políticas RLS em:")
     print("   - artistas: acesso baseado em tenant")
     print("   - contatos_artistas: acesso via artista")
     print("   - conversas: acesso via tenant")
@@ -139,7 +139,7 @@ def configurar_rls():
 
 def main():
     """Executa configuração completa do banco"""
-    print("🚀 CONFIGURAÇÃO DO BANCO DE DADOS - WIP ARTISTA BOT")
+    print(" CONFIGURAÇÃO DO BANCO DE DADOS - WIP ARTISTA BOT")
     print("=" * 60)
     
     # Carregar variáveis de ambiente
@@ -147,7 +147,7 @@ def main():
     
     # Verificar variáveis necessárias
     if not os.getenv("SUPABASE_URL") or not os.getenv("SUPABASE_KEY"):
-        print("❌ Variáveis SUPABASE_URL e SUPABASE_KEY devem estar configuradas")
+        print(" Variáveis SUPABASE_URL e SUPABASE_KEY devem estar configuradas")
         return 1
     
     resultados = []
@@ -166,18 +166,18 @@ def main():
     
     # Resumo
     print("\n" + "=" * 60)
-    print("📋 RESUMO DA CONFIGURAÇÃO")
+    print(" RESUMO DA CONFIGURAÇÃO")
     print("=" * 60)
     
     sucessos = 0
     for nome, sucesso in resultados:
-        status = "✅ OK" if sucesso else "❌ ERRO"
+        status = " OK" if sucesso else "❌ ERRO"
         print(f"{nome:<25} {status}")
         if sucesso:
             sucessos += 1
     
     if sucessos == len(resultados):
-        print("\n🎉 BANCO DE DADOS CONFIGURADO COM SUCESSO!")
+        print("\n BANCO DE DADOS CONFIGURADO COM SUCESSO!")
         print("\nPróximos passos:")
         print("1. Execute o script de teste de integração:")
         print("   python scripts/test_integration.py")
@@ -185,7 +185,7 @@ def main():
         print("   python main.py")
         return 0
     else:
-        print("\n⚠️  ALGUNS PROBLEMAS FORAM ENCONTRADOS.")
+        print("\n ALGUNS PROBLEMAS FORAM ENCONTRADOS.")
         print("Verifique os erros acima e execute novamente.")
         return 1
 

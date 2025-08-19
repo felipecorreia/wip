@@ -6,17 +6,47 @@ O WIP Artista Bot é um sistema de onboarding conversacional para artistas, cons
 
 O objetivo é simples: tratar o artista com a atenção que ele merece, enquanto otimiza o processo de curadoria para a casa de shows.
 
+## Arquitetura do Fluxo
+
+O sistema utiliza um fluxo híbrido inteligente que automaticamente escolhe o melhor caminho baseado no contexto:
+
+### Fluxo Principal
+1. **Entrada via WhatsApp**: Mensagens chegam pelo webhook Twilio
+2. **Roteamento Inteligente**: Sistema decide entre 3 caminhos possíveis
+3. **Processamento Otimizado**: Resposta em tempo real adaptada ao contexto
+4. **Persistência**: Dados salvos no Supabase multi-tenant
+
+### Três Caminhos de Processamento
+
+**Fluxo Simplificado (Novos Usuários)**
+- Extração automática de dados da primeira mensagem via LLM
+- Coleta progressiva apenas do que falta
+- Resposta rápida sem overhead do LangGraph
+- Ideal para cadastros simples e diretos
+
+**Fluxo Direto (Usuários Existentes)**
+- Menu interativo com opções pré-definidas
+- Detecção de intenção por palavras-chave
+- Respostas instantâneas sem processamento LLM
+- Completar cadastro se necessário
+
+**Fluxo LangGraph (Casos Complexos)**
+- Grafo de estados para conversas não-lineares
+- Extração avançada com contexto histórico
+- Máximo de 3 tentativas antes de finalizar
+- Usado apenas quando explicitamente necessário
+
 ---
 
 ## Destaques da Arquitetura
 
--   **🧠 Extração de Dados com LLM**: O coração do bot. Em vez de um roteiro fixo, ele usa um LLM (com fallback entre OpenAI, Anthropic e Gemini) para entender e extrair informações de uma conversa em linguagem natural.
--   **⛓️ Orquestração com LangGraph**: O fluxo da conversa é gerenciado por um grafo de estados, permitindo lidar com diálogos complexos, parciais e não lineares. O grafo possui mecanismos de prevenção de loops para garantir robustez.
--   **⚡ Fluxo Híbrido Otimizado**: Respostas instantâneas para usuários já conhecidos e um fluxo de IA completo para novos cadastros, otimizando a experiência e a performance.
--   **📱 Integração Nativa com WhatsApp**: Conexão direta via Twilio, com timeouts adaptativos para garantir respostas dentro da janela da plataforma.
--   **🏢 Banco de Dados Multi-tenant**: Arquitetura no Supabase pronta para escalar para outras casas de show, com suporte completo à Cervejaria Bragantina.
--   **🔭 Observabilidade de Ponta a Ponta**: Traces detalhados de cada conversa no LangSmith para depuração, análise de performance e monitoramento da qualidade dos dados extraídos.
--   **🛡️ Validação e Robustez**: Uso de schemas Pydantic para garantir a integridade dos dados em todas as etapas do fluxo, desde a extração pelo LLM até a inserção no banco de dados.
+- **Extração de Dados com LLM**: O coração do bot. Em vez de um roteiro fixo, ele usa um LLM (com fallback entre OpenAI, Anthropic e Gemini) para entender e extrair informações de uma conversa em linguagem natural.
+- **Orquestração com LangGraph**: O fluxo da conversa é gerenciado por um grafo de estados, permitindo lidar com diálogos complexos, parciais e não lineares. O grafo possui mecanismos de prevenção de loops para garantir robustez.
+- **Fluxo Híbrido Otimizado**: Respostas instantâneas para usuários já conhecidos e um fluxo de IA completo para novos cadastros, otimizando a experiência e a performance.
+- **Integração Nativa com WhatsApp**: Conexão direta via Twilio, com timeouts adaptativos para garantir respostas dentro da janela da plataforma.
+- **Banco de Dados Multi-tenant**: Arquitetura no Supabase pronta para escalar para outras casas de show, com suporte completo à Cervejaria Bragantina.
+- **Observabilidade de Ponta a Ponta**: Traces detalhados de cada conversa no LangSmith para depuração, análise de performance e monitoramento da qualidade dos dados extraídos.
+- **Validação e Robustez**: Uso de schemas Pydantic para garantir a integridade dos dados em todas as etapas do fluxo, desde a extração pelo LLM até a inserção no banco de dados.
 
 ---
 
@@ -119,16 +149,20 @@ TWILIO_WHATSAPP_FROM=whatsapp:+14155238886
 ### Fluxo de Conversação
 
 **Para Novos Usuários** (fluxo simplificado):
-1. **Nome** do artista/banda (obrigatório)
-2. **Estilo musical** principal  
-3. **Cidade** onde atua
-4. **Links** de redes sociais (Instagram, YouTube, Spotify)
-5. Cadastro automático na Cervejaria Bragantina
+1. Sistema extrai automaticamente dados da primeira mensagem
+2. Coleta apenas informações faltantes:
+   - **Nome** do artista/banda (obrigatório)
+   - **Estilo musical** principal  
+   - **Cidade** onde atua
+   - **Links** de redes sociais (Instagram, YouTube, Spotify)
+3. Cadastro automático na Cervejaria Bragantina
+4. Transição para menu principal
 
 **Para Usuários Existentes** (resposta instantânea):
 - **Menu Principal**: Agenda, Dados, Casa
 - **Detecção de Intenção**: Palavras-chave para resposta rápida
 - **Atualização de Dados**: Fluxo específico para completar informações
+- **Sem processamento LLM**: Respostas pré-definidas para velocidade
 
 ### Comandos Especiais
 
@@ -201,6 +235,9 @@ wip/
 │   ├── llm_config.py       # Configuração dos LLMs com lógica de fallback
 │   ├── llm_extractor.py    # Função de extração de dados com LLM
 │   ├── flow.py             # Lógica principal do fluxo com LangGraph
+│   ├── flow_direct.py      # Fluxo otimizado para usuários existentes
+│   ├── flow_new_user.py    # Fluxo simplificado para novos usuários
+│   ├── flow_update.py      # Fluxo para atualização de dados
 │   ├── conversation_utils.py # Funções auxiliares (reiniciar, status)
 │   ├── observability.py    # Configuração do LangSmith
 │   ├── queue_manager.py   # Processamento assíncrono

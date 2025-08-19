@@ -44,6 +44,7 @@ def detectar_intencao_menu(mensagem: str) -> str:
 def gerar_menu_principal(artista: Artista) -> str:
     """Gera menu principal para artista existente"""
     return (
+        
         f"Olá {artista.nome}! WIP da Cervejaria Bragantina aqui 🍺\n\n"
         f"Como posso ajudar hoje?\n\n"
         f"📅 **Agenda** - ver datas disponíveis para shows\n"

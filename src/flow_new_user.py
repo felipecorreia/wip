@@ -26,14 +26,84 @@ async def processar_novo_usuario_simples(
         telefone_limpo = telefone.replace("whatsapp:", "")
         etapa = estado.etapa_atual
         
-        # Primeira mensagem - boas vindas
+        # Primeira mensagem - verificar se já contém dados antes de enviar boas vindas
         if etapa in ["inicio", "recepcao", ""]:
-            estado.etapa_atual = "coleta_nome"
-            return (
-                "Olá! Sou a WIP, assistente virtual da Cervejaria Bragantina 🍺\n\n"
-                "Vamos cadastrar você para tocar aqui na casa?\n"
-                "Para começar, qual é o seu nome ou nome da sua banda?"
-            )
+            # Tentar extrair dados da primeira mensagem usando LLM
+            from .llm_extractor import extrair_dados_com_llm
+            
+            try:
+                dados_extraidos = await extrair_dados_com_llm(mensagem)
+                logger.info(f"Dados extraídos da primeira mensagem: {dados_extraidos.model_dump(exclude_unset=True)}")
+                
+                # Se encontrou nome na primeira mensagem, pular direto para próxima etapa
+                if dados_extraidos.nome:
+                    estado.dados_coletados["nome"] = dados_extraidos.nome
+                    
+                    # Verificar se tem estilo também
+                    if dados_extraidos.estilo_musical:
+                        estado.dados_coletados["estilo_musical"] = dados_extraidos.estilo_musical
+                        
+                        # Verificar se tem cidade
+                        if dados_extraidos.cidade:
+                            estado.dados_coletados["cidade"] = dados_extraidos.cidade
+                            
+                            # Verificar se tem links
+                            if dados_extraidos.instagram or dados_extraidos.youtube or dados_extraidos.spotify:
+                                if dados_extraidos.instagram:
+                                    estado.dados_coletados["instagram"] = dados_extraidos.instagram
+                                if dados_extraidos.youtube:
+                                    estado.dados_coletados["youtube"] = dados_extraidos.youtube
+                                if dados_extraidos.spotify:
+                                    estado.dados_coletados["spotify"] = dados_extraidos.spotify
+                                
+                                # Tem todos os dados - processar como coleta de links
+                                estado.etapa_atual = "coleta_links"
+                                mensagem = "links_fornecidos"  # Flag para processar direto
+                                etapa = "coleta_links"
+                            else:
+                                # Falta só os links
+                                estado.etapa_atual = "coleta_links"
+                                return (
+                                    f"Show de bola, {dados_extraidos.nome}! "
+                                    f"Anotei aqui que {'o som é ' + dados_extraidos.estilo_musical if dados_extraidos.estilo_musical else 'você é'} "
+                                    f"{'de ' + dados_extraidos.cidade if dados_extraidos.cidade else ''}.\n\n"
+                                    f"Para fechar, só preciso que me envie o link do seu Instagram, YouTube ou Spotify "
+                                    f"para eu conhecer seu trabalho."
+                                )
+                        else:
+                            # Tem nome e estilo, falta cidade
+                            estado.etapa_atual = "coleta_cidade"
+                            return (
+                                f"Show de bola, {dados_extraidos.nome}! "
+                                f"Anotei aqui que o som é {dados_extraidos.estilo_musical}. 🎵\n\n"
+                                f"De qual cidade você é?"
+                            )
+                    else:
+                        # Tem só o nome, perguntar estilo
+                        estado.etapa_atual = "coleta_estilo"
+                        return (
+                            f"Prazer, {dados_extraidos.nome}! 🎸\n\n"
+                            f"Qual é o seu estilo musical principal?\n"
+                            f"(Rock, MPB, Samba, Pop, Sertanejo, etc)"
+                        )
+                else:
+                    # Não encontrou nome - enviar boas vindas normal
+                    estado.etapa_atual = "coleta_nome"
+                    return (
+                        "Olá! Sou a WIP, assistente virtual da Cervejaria Bragantina\n\n"
+                        "Sou responsável por organizar a agenda de shows da Bragantina.\n"
+                        "Antes de começar já me diz qual seu nome ou nome da sua banda?"
+                    )
+                    
+            except Exception as e:
+                logger.warning(f"Erro ao extrair dados da primeira mensagem: {str(e)}")
+                # Em caso de erro, continuar com fluxo normal
+                estado.etapa_atual = "coleta_nome"
+                return (
+                    "Olá! Sou a WIP, assistente virtual da Cervejaria Bragantina\n\n"
+                    "Sou responsável por organizar a agenda de shows da Bragantina.\n"
+                    "Antes de começar já me diz qual seu nome ou nome da sua banda?"
+                )
         
         # Coletar nome
         elif etapa == "coleta_nome":
@@ -74,54 +144,63 @@ async def processar_novo_usuario_simples(
         
         # Coletar links
         elif etapa == "coleta_links":
-            # Extrair e normalizar links
-            mensagem_limpa = mensagem.strip()
-            
-            if "@" in mensagem_limpa:
-                # Instagram detectado - extrair username
-                match = re.search(r'@(\w+)', mensagem_limpa)
-                if match:
-                    username = match.group(1)
-                    estado.dados_coletados["instagram"] = f"https://instagram.com/{username}"
-                    logger.info(f"Instagram extraído: @{username} -> https://instagram.com/{username}")
-                else:
-                    # Fallback - assumir que é username direto
-                    username = mensagem_limpa.replace("@", "").strip()
-                    estado.dados_coletados["instagram"] = f"https://instagram.com/{username}"
-            elif "youtube" in mensagem_limpa.lower():
-                # YouTube detectado
-                if "youtube.com" in mensagem_limpa or "youtu.be" in mensagem_limpa:
-                    estado.dados_coletados["youtube"] = mensagem_limpa
-                else:
-                    # Assumir que é canal/username
-                    canal = mensagem_limpa.replace("youtube", "").replace("/", "").strip()
-                    estado.dados_coletados["youtube"] = f"https://youtube.com/{canal}"
-            elif "spotify" in mensagem_limpa.lower():
-                # Spotify detectado
-                if "spotify.com" in mensagem_limpa:
-                    estado.dados_coletados["spotify"] = mensagem_limpa
-                else:
-                    # Assumir que é artista/ID
-                    artista = mensagem_limpa.replace("spotify", "").replace("/", "").strip()
-                    estado.dados_coletados["spotify"] = f"https://open.spotify.com/artist/{artista}"
-            elif mensagem_limpa.startswith("http"):
-                # URL completa fornecida - tentar detectar plataforma
-                if "instagram.com" in mensagem_limpa:
-                    estado.dados_coletados["instagram"] = mensagem_limpa
-                elif "youtube.com" in mensagem_limpa or "youtu.be" in mensagem_limpa:
-                    estado.dados_coletados["youtube"] = mensagem_limpa
-                elif "spotify.com" in mensagem_limpa:
-                    estado.dados_coletados["spotify"] = mensagem_limpa
-                else:
-                    # URL desconhecida - salvar como Instagram por default
-                    estado.dados_coletados["instagram"] = mensagem_limpa
+            # Se já tem links coletados via LLM (flag especial)
+            if mensagem == "links_fornecidos" and (
+                estado.dados_coletados.get("instagram") or 
+                estado.dados_coletados.get("youtube") or 
+                estado.dados_coletados.get("spotify")
+            ):
+                # Pular direto para persistir os dados
+                pass
             else:
-                # Assumir que é username do Instagram sem @
-                username = mensagem_limpa.strip()
-                estado.dados_coletados["instagram"] = f"https://instagram.com/{username}"
-                logger.info(f"Assumindo Instagram: {username} -> https://instagram.com/{username}")
+                # Extrair e normalizar links
+                mensagem_limpa = mensagem.strip()
             
-            # Finalizar cadastro - SALVAR NO SUPABASE
+                if "@" in mensagem_limpa:
+                    # Instagram detectado - extrair username
+                    match = re.search(r'@(\w+)', mensagem_limpa)
+                    if match:
+                        username = match.group(1)
+                        estado.dados_coletados["instagram"] = f"https://instagram.com/{username}"
+                        logger.info(f"Instagram extraído: @{username} -> https://instagram.com/{username}")
+                    else:
+                        # Fallback - assumir que é username direto
+                        username = mensagem_limpa.replace("@", "").strip()
+                        estado.dados_coletados["instagram"] = f"https://instagram.com/{username}"
+                elif "youtube" in mensagem_limpa.lower():
+                    # YouTube detectado
+                    if "youtube.com" in mensagem_limpa or "youtu.be" in mensagem_limpa:
+                        estado.dados_coletados["youtube"] = mensagem_limpa
+                    else:
+                        # Assumir que é canal/username
+                        canal = mensagem_limpa.replace("youtube", "").replace("/", "").strip()
+                        estado.dados_coletados["youtube"] = f"https://youtube.com/{canal}"
+                elif "spotify" in mensagem_limpa.lower():
+                    # Spotify detectado
+                    if "spotify.com" in mensagem_limpa:
+                        estado.dados_coletados["spotify"] = mensagem_limpa
+                    else:
+                        # Assumir que é artista/ID
+                        artista = mensagem_limpa.replace("spotify", "").replace("/", "").strip()
+                        estado.dados_coletados["spotify"] = f"https://open.spotify.com/artist/{artista}"
+                elif mensagem_limpa.startswith("http"):
+                    # URL completa fornecida - tentar detectar plataforma
+                    if "instagram.com" in mensagem_limpa:
+                        estado.dados_coletados["instagram"] = mensagem_limpa
+                    elif "youtube.com" in mensagem_limpa or "youtu.be" in mensagem_limpa:
+                        estado.dados_coletados["youtube"] = mensagem_limpa
+                    elif "spotify.com" in mensagem_limpa:
+                        estado.dados_coletados["spotify"] = mensagem_limpa
+                    else:
+                        # URL desconhecida - salvar como Instagram por default
+                        estado.dados_coletados["instagram"] = mensagem_limpa
+                else:
+                    # Assumir que é username do Instagram sem @
+                    username = mensagem_limpa.strip()
+                    estado.dados_coletados["instagram"] = f"https://instagram.com/{username}"
+                    logger.info(f"Assumindo Instagram: {username} -> https://instagram.com/{username}")
+
+            # Persiste dados no supabase
             try:
                 # Importar schemas necessários
                 from .schemas import Artista, Contato, Link, TipoContato, EstiloMusical
@@ -196,39 +275,39 @@ async def processar_novo_usuario_simples(
                     
                     nome = artista.nome
                     return (
-                        f"🎉 Perfeito, {nome}! Cadastro concluído!\n\n"
-                        f"📋 Resumo:\n"
+                        f" Perfeito, {nome}! Já tenho todas suas informações!!\n\n"
+                        f" Resumo:\n"
                         f"• Nome: {artista.nome}\n"
                         f"• Estilo: {artista.estilo_musical.value if hasattr(artista.estilo_musical, 'value') else artista.estilo_musical if artista.estilo_musical else 'Não informado'}\n"
                         f"• Cidade: {artista.cidade}\n"
                         f"• WhatsApp: {telefone_limpo}\n\n"
-                        f"Você já está em nosso sistema! 🍺\n\n"
-                        f"Como posso ajudar?\n\n"
-                        f"📅 **Agenda** - ver datas disponíveis\n"
-                        f"📝 **Dados** - atualizar informações\n"
-                        f"🏠 **Casa** - sobre a Cervejaria"
+                        f"Agora as informações da sua banda conseguimos avançar! \n\n"
+                        f"Do que você precisa,{nome} \n\n"
+                        f"📅 *Agenda* - ver datas disponíveis\n"
+                        f"📝 *Dados* - atualizar informações\n"
+                        f"🏠 *Casa* - sobre a Cervejaria"
                     )
                 else:
                     # Erro ao salvar
                     logger.error(f"Erro ao salvar artista: {resultado.get('error')}")
                     return (
                         f"Ops, {estado.dados_coletados.get('nome')}! "
-                        f"Tive um probleminha ao salvar seu cadastro.\n\n"
-                        f"Pode tentar novamente em alguns instantes?"
+                        f"Tive um probleminha por aqui.\n\n"
+                        f"Posso te chamarem alguns instantes?"
                     )
                     
             except Exception as e:
                 logger.error(f"Erro ao criar artista: {str(e)}")
                 return (
-                    "Desculpe, tive um problema técnico ao finalizar seu cadastro. "
-                    "Pode tentar novamente?"
+                    "Desculpe, Tive um probleminha por aqui. "
+                    "Posso te chamar depois pra terminar o papo?"
                 )
         
         # Estado desconhecido - resetar
         else:
             estado.etapa_atual = "coleta_nome"
             return (
-                "Vamos recomeçar seu cadastro.\n"
+                "Beleza, vamos recomeçar do zero.\n"
                 "Qual é o seu nome artístico ou da banda?"
             )
             

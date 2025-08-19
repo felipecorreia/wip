@@ -2,7 +2,7 @@ import os
 import logging
 import time
 import asyncio
-from typing import Any
+from typing import Any, List, Optional
 from fastapi import FastAPI, Request, HTTPException, Depends, BackgroundTasks, Form
 from fastapi.responses import Response 
 from fastapi.middleware.cors import CORSMiddleware
@@ -27,6 +27,8 @@ from src.observability import (
 )
 from src.queue_manager import message_queue
 from src.llm_config import EnhancedLLMConfig
+from src.llm_analyzer import analisar_mensagem_llm, AnaliseIntent
+from src.flow_unified import processar_mensagem_unificada, get_estatisticas_estados
 
 # Configurar logging
 logging.basicConfig(
@@ -259,23 +261,35 @@ async def webhook_whatsapp(
         
         # Process message directly with optimized flow
         try:
-            # Check if it's an existing user first (quick check)
-            artista_existente = supabase.buscar_artista_por_telefone(telefone_limpo)
+            # Check feature flag for unified flow
+            use_unified_flow = os.getenv("USE_UNIFIED_FLOW", "false").lower() == "true"
             
-            if artista_existente:
-                # Use shorter timeout for existing users (should be instant)
-                timeout_seconds = 3.0
-                logger.info(f"Existing artist detected: {artista_existente.nome}, using fast timeout")
+            if use_unified_flow:
+                # Use new unified flow with LLM analysis
+                logger.info(f"Using unified flow for {telefone_limpo}")
+                timeout_seconds = 10.0  # Reasonable timeout for LLM
+                resposta_real = await asyncio.wait_for(
+                    processar_mensagem_unificada(telefone, mensagem, supabase),
+                    timeout=timeout_seconds
+                )
             else:
-                # New users might need more time
-                timeout_seconds = 13.0  # Slightly less than Twilio's 15s limit
-                logger.info("New user detected, using standard timeout")
-            
-            # Use optimized flow that decides between direct response or LangGraph
-            resposta_real = await asyncio.wait_for(
-                processar_mensagem_otimizado(telefone, mensagem, estado, supabase),
-                timeout=timeout_seconds
-            )
+                # Check if it's an existing user first (quick check)
+                artista_existente = supabase.buscar_artista_por_telefone(telefone_limpo)
+                
+                if artista_existente:
+                    # Use shorter timeout for existing users (should be instant)
+                    timeout_seconds = 3.0
+                    logger.info(f"Existing artist detected: {artista_existente.nome}, using fast timeout")
+                else:
+                    # New users might need more time
+                    timeout_seconds = 13.0  # Slightly less than Twilio's 15s limit
+                    logger.info("New user detected, using standard timeout")
+                
+                # Use optimized flow that decides between direct response or LangGraph
+                resposta_real = await asyncio.wait_for(
+                    processar_mensagem_otimizado(telefone, mensagem, estado, supabase),
+                    timeout=timeout_seconds
+                )
             logger.info(f"Response obtained in time: {resposta_real[:100]}...")
         except asyncio.TimeoutError:
             logger.warning(f"Processing timeout for {telefone_limpo} after {timeout_seconds}s")
@@ -287,10 +301,14 @@ async def webhook_whatsapp(
         # Save updated state
         salvar_estado_conversa(telefone, estado, supabase)
         
+        # Escape special XML characters
+        import html
+        resposta_escaped = html.escape(resposta_real)
+        
         # Generate TwiML response with ACTUAL LLM content
         response_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Message>{resposta_real}</Message>
+    <Message>{resposta_escaped}</Message>
 </Response>"""
         
         # Log response time
@@ -375,8 +393,13 @@ async def get_metrics():
         # Adicionar métricas do sistema
         relatorio["sistema"] = {
             "conversas_ativas": len(estados_conversa),
-            "observabilidade_ativa": metricas_bot.client is not None
+            "observabilidade_ativa": metricas_bot.client is not None,
+            "fluxo_unificado_ativo": os.getenv("USE_UNIFIED_FLOW", "false").lower() == "true"
         }
+        
+        # Adicionar estatísticas do fluxo unificado se ativo
+        if os.getenv("USE_UNIFIED_FLOW", "false").lower() == "true":
+            relatorio["fluxo_unificado"] = get_estatisticas_estados()
         
         # Adicionar métricas da queue
         relatorio["queue"] = message_queue.get_stats()
@@ -481,6 +504,140 @@ async def llm_status():
         }
     except Exception as e:
         logger.error(f"Error getting LLM status: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Endpoint para testar análise LLM (FASE 1)
+@app.post("/test/analyze")
+async def test_analyze_message(
+    mensagem: str = Form(...),
+    historico: Optional[str] = Form(None),
+    artista_existente: bool = Form(False),
+    supabase: SupabaseManager = Depends(obter_supabase)
+):
+    """
+    Endpoint para testar análise de intenção com LLM
+    
+    Exemplos de uso:
+    curl -X POST http://localhost:8000/test/analyze \
+        --data-urlencode "mensagem=Oi, sou João da banda Rock Total"
+    """
+    try:
+        # Processar histórico se fornecido
+        historico_list = None
+        if historico:
+            historico_list = historico.split("|")  # Separar por pipe
+        
+        # Buscar dados coletados se for usuário existente
+        dados_coletados = None
+        if artista_existente:
+            # Simulação - em produção buscaríamos do banco
+            dados_coletados = {}
+        
+        # Analisar mensagem
+        analise = await analisar_mensagem_llm(
+            mensagem=mensagem,
+            historico=historico_list,
+            dados_coletados=dados_coletados,
+            artista_existente=artista_existente
+        )
+        
+        # Retornar análise completa
+        return {
+            "mensagem_original": mensagem,
+            "analise": {
+                "intencao": analise.intencao.value,
+                "intencao_secundaria": analise.intencao_secundaria.value if analise.intencao_secundaria else None,
+                "entidades": analise.entidades.model_dump(exclude_unset=True),
+                "contexto": analise.contexto.value,
+                "sentimento": analise.sentimento.value,
+                "urgencia": analise.urgencia.value,
+                "confianca": analise.confianca,
+                "palavras_chave": analise.palavras_chave,
+                "precisa_acao_humana": analise.precisa_acao_humana,
+                "resumo": analise.resumo
+            },
+            "debug": {
+                "artista_existente": artista_existente,
+                "historico_fornecido": bool(historico)
+            }
+        }
+    except Exception as e:
+        logger.error(f"Erro no teste de análise: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Endpoint para testar múltiplas mensagens de uma vez
+@app.post("/test/analyze/batch")
+async def test_analyze_batch(
+    mensagens: List[str] = Form(...),
+):
+    """
+    Testa análise de múltiplas mensagens para validar consistência
+    
+    Exemplo:
+    curl -X POST http://localhost:8000/test/analyze/batch \
+        -d "mensagens=Oi" \
+        -d "mensagens=Sou a banda Rock Total" \
+        -d "mensagens=Queremos tocar sexta"
+    """
+    try:
+        resultados = []
+        
+        for mensagem in mensagens:
+            analise = await analisar_mensagem_llm(mensagem)
+            resultados.append({
+                "mensagem": mensagem,
+                "intencao": analise.intencao.value,
+                "confianca": analise.confianca,
+                "entidades": analise.entidades.model_dump(exclude_unset=True)
+            })
+        
+        return {
+            "total_mensagens": len(mensagens),
+            "resultados": resultados
+        }
+    except Exception as e:
+        logger.error(f"Erro no teste batch: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Endpoint para testar fluxo unificado (FASE 2)
+@app.post("/test/unified")
+async def test_unified_flow(
+    telefone: str = Form(...),
+    mensagem: str = Form(...),
+    supabase: SupabaseManager = Depends(obter_supabase)
+):
+    """
+    Endpoint para testar fluxo unificado com análise LLM
+    
+    Exemplos de uso:
+    curl -X POST http://localhost:8000/test/unified \
+        -d "telefone=+5511999999999" \
+        -d "mensagem=Oi, sou João da banda Rock Total de Campinas"
+    """
+    try:
+        # Forçar uso do fluxo unificado
+        resposta = await processar_mensagem_unificada(telefone, mensagem, supabase)
+        
+        # Buscar análise para debug
+        from src.flow_unified import get_estado_usuario
+        estado = get_estado_usuario(telefone)
+        
+        return {
+            "telefone": telefone,
+            "mensagem": mensagem,
+            "resposta": resposta,
+            "debug": {
+                "ultima_intencao": estado.ultima_intencao,
+                "dados_coletados": estado.dados_coletados,
+                "aguardando_resposta": estado.aguardando_resposta,
+                "historico_size": len(estado.historico)
+            }
+        }
+    except Exception as e:
+        logger.error(f"Erro no teste do fluxo unificado: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
