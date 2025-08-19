@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cervejaria Bragantina - Artistas</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: #f8fafc;
+            min-height: 100vh;
+            padding: 24px;
+            margin: 0;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            overflow: hidden;
+            border: 1px solid #e2e8f0;
+        }
+
+        .header {
+            background: #1e40af;
+            color: white;
+            padding: 32px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2rem;
+            margin-bottom: 8px;
+            font-weight: 600;
+            letter-spacing: -0.025em;
+        }
+
+        .header p {
+            opacity: 0.9;
+            font-size: 1rem;
+            font-weight: 400;
+        }
+
+        .controls {
+            background: #ffffff;
+            padding: 24px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .toggle-section {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 24px;
+            flex-wrap: wrap;
+        }
+
+        .toggle-btn {
+            background: #f3f4f6;
+            color: #374151;
+            border: 1px solid #d1d5db;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.15s ease;
+            font-weight: 500;
+        }
+
+        .toggle-btn.active {
+            background: #3b82f6;
+            color: white;
+            border-color: #3b82f6;
+        }
+
+        .toggle-btn:hover {
+            background: #e5e7eb;
+            border-color: #9ca3af;
+        }
+
+        .toggle-btn.active:hover {
+            background: #2563eb;
+        }
+
+        .filters {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .filter-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .filter-group label {
+            font-weight: 500;
+            color: #374151;
+        }
+
+        .filter-input, .filter-select {
+            padding: 8px 12px;
+            border: 2px solid #e5e7eb;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.3s ease;
+        }
+
+        .filter-input:focus, .filter-select:focus {
+            outline: none;
+            border-color: #3b82f6;
+        }
+
+        .table-container {
+            overflow-x: auto;
+        }
+
+        .artists-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .artists-table th {
+            background: #1e40af;
+            color: white;
+            padding: 15px 12px;
+            text-align: left;
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+
+        .artists-table td {
+            padding: 12px;
+            border-bottom: 1px solid #e9ecef;
+            vertical-align: middle;
+        }
+
+        .artists-table tr:nth-child(even) {
+            background: #f8fafc;
+        }
+
+        .artists-table tr:hover {
+            background: #dbeafe;
+            transform: scale(1.01);
+            transition: all 0.2s ease;
+        }
+
+        .status-badge {
+            padding: 4px 12px;
+            border-radius: 15px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .status-novo {
+            background: #dbeafe;
+            color: #1e40af;
+        }
+
+        .status-contato {
+            background: #d1fae5;
+            color: #065f46;
+        }
+
+        .instagram-link {
+            color: #E4405F;
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        .instagram-link:hover {
+            text-decoration: underline;
+        }
+
+        .whatsapp-link {
+            color: #25D366;
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        .whatsapp-link:hover {
+            text-decoration: underline;
+        }
+
+        .footer {
+            background: #f8fafc;
+            padding: 20px;
+            text-align: center;
+            border-top: 1px solid #e5e7eb;
+        }
+
+        .stats {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            flex-wrap: wrap;
+        }
+
+        .stat-item {
+            text-align: center;
+        }
+
+        .stat-number {
+            font-size: 2em;
+            font-weight: bold;
+            color: #1e40af;
+        }
+
+        .stat-label {
+            color: #6b7280;
+            font-size: 0.9em;
+        }
+
+        .no-results {
+            text-align: center;
+            padding: 40px;
+            color: #6b7280;
+            font-style: italic;
+        }
+
+        /* Responsividade */
+        @media (max-width: 768px) {
+            .header h1 {
+                font-size: 2em;
+            }
+
+            .toggle-section {
+                justify-content: center;
+            }
+
+            .filters {
+                justify-content: center;
+            }
+
+            .artists-table th,
+            .artists-table td {
+                padding: 8px 6px;
+                font-size: 14px;
+            }
+
+            .stats {
+                gap: 15px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Cervejaria Bragantina</h1>
+            <p>Gestão de Artistas - Sistema de Cadastro via WhatsApp</p>
+        </div>
+
+        <div class="controls">
+            <div class="toggle-section">
+                <button class="toggle-btn active" id="btn-todos" onclick="setFilter('todos')">
+                    Todos os Artistas
+                </button>
+                <button class="toggle-btn" id="btn-contato" onclick="setFilter('contato')">
+                    Apenas com Contato
+                </button>
+            </div>
+
+            <div class="filters">
+                <div class="filter-group">
+                    <label for="search">Buscar:</label>
+                    <input type="text" id="search" class="filter-input" placeholder="Nome do artista..." 
+                           onkeyup="applyFilters()">
+                </div>
+                <div class="filter-group">
+                    <label for="estilo">Estilo:</label>
+                    <select id="estilo" class="filter-select" onchange="applyFilters()">
+                        <option value="">Todos</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label for="cidade">Cidade:</label>
+                    <select id="cidade" class="filter-select" onchange="applyFilters()">
+                        <option value="">Todas</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <div class="table-container">
+            <table class="artists-table">
+                <thead>
+                    <tr>
+                        <th>Nome</th>
+                        <th>Estilo</th>
+                        <th>Cidade</th>
+                        <th>WhatsApp</th>
+                        <th>Instagram</th>
+                        <th>Status</th>
+                        <th>Última Interação</th>
+                    </tr>
+                </thead>
+                <tbody id="artists-tbody">
+                    <!-- Dados serão inseridos via JavaScript -->
+                </tbody>
+            </table>
+            <div id="no-results" class="no-results" style="display: none;">
+                Nenhum artista encontrado com os filtros aplicados.
+            </div>
+        </div>
+
+        <div class="footer">
+            <div class="stats">
+                <div class="stat-item">
+                    <div class="stat-number" id="total-artistas">0</div>
+                    <div class="stat-label">Total de Artistas</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-number" id="com-contato">0</div>
+                    <div class="stat-label">Com Contato</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-number" id="artistas-visiveis">0</div>
+                    <div class="stat-label">Exibindo</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Dados simulados dos artistas
+        const artistas = [
+            {
+                nome: "João Silva",
+                estilo: "Rock",
+                cidade: "São Paulo",
+                whatsapp: "+5511999887766",
+                instagram: "@joaosilvarock",
+                temContato: true,
+                ultimaInteracao: "13/08/2025 14:30"
+            },
+            {
+                nome: "Maria Lima",
+                estilo: "MPB",
+                cidade: "Rio de Janeiro", 
+                whatsapp: "+5521888776655",
+                instagram: "@marialima_music",
+                temContato: true,
+                ultimaInteracao: "13/08/2025 12:15"
+            },
+            {
+                nome: "Pedro Santos",
+                estilo: "Samba",
+                cidade: "São Paulo",
+                whatsapp: "+5511777665544",
+                instagram: "@pedrosamba",
+                temContato: true,
+                ultimaInteracao: "12/08/2025 18:45"
+            },
+            {
+                nome: "Ana Costa",
+                estilo: "Pop",
+                cidade: "Belo Horizonte",
+                whatsapp: "+5531666554433",
+                instagram: "@anacosta_pop",
+                temContato: true,
+                ultimaInteracao: "12/08/2025 16:20"
+            },
+            {
+                nome: "Carlos Rocha",
+                estilo: "Blues",
+                cidade: "São Paulo",
+                whatsapp: "+5511555443322",
+                instagram: "@carlosblues",
+                temContato: true,
+                ultimaInteracao: "11/08/2025 20:10"
+            },
+            {
+                nome: "Luana Oliveira",
+                estilo: "Jazz",
+                cidade: "Rio de Janeiro",
+                whatsapp: "+5521444332211",
+                instagram: "@luanajazz",
+                temContato: true,
+                ultimaInteracao: "11/08/2025 15:30"
+            },
+            {
+                nome: "Felipe Correia",
+                estilo: "Samba",
+                cidade: "São Paulo",
+                whatsapp: "+5511981915413",
+                instagram: "@felipecorrei",
+                temContato: false,
+                ultimaInteracao: "13/08/2025 23:00"
+            },
+            {
+                nome: "Bruno Alves",
+                estilo: "Rock",
+                cidade: "São Paulo",
+                whatsapp: "+5511777766665",
+                instagram: "@brunoalves_rock",
+                temContato: false,
+                ultimaInteracao: "13/08/2025 22:45"
+            },
+            {
+                nome: "Carla Mendes",
+                estilo: "MPB",
+                cidade: "Rio de Janeiro",
+                whatsapp: "+5521666555444",
+                instagram: "@carlampb",
+                temContato: false,
+                ultimaInteracao: "13/08/2025 21:20"
+            },
+            {
+                nome: "Daniel Silva",
+                estilo: "Eletrônica",
+                cidade: "São Paulo",
+                whatsapp: "+5511555444333",
+                instagram: "@danielmusic",
+                temContato: false,
+                ultimaInteracao: "13/08/2025 20:15"
+            }
+        ];
+
+        let currentFilter = 'todos';
+        let filteredArtistas = [...artistas];
+
+        // Inicialização
+        document.addEventListener('DOMContentLoaded', function() {
+            populateFilters();
+            renderTable();
+            updateStats();
+        });
+
+        function populateFilters() {
+            // Popular filtro de estilos
+            const estilos = [...new Set(artistas.map(a => a.estilo))].sort();
+            const estiloSelect = document.getElementById('estilo');
+            estilos.forEach(estilo => {
+                const option = document.createElement('option');
+                option.value = estilo;
+                option.textContent = estilo;
+                estiloSelect.appendChild(option);
+            });
+
+            // Popular filtro de cidades
+            const cidades = [...new Set(artistas.map(a => a.cidade))].sort();
+            const cidadeSelect = document.getElementById('cidade');
+            cidades.forEach(cidade => {
+                const option = document.createElement('option');
+                option.value = cidade;
+                option.textContent = cidade;
+                cidadeSelect.appendChild(option);
+            });
+        }
+
+        function setFilter(filter) {
+            currentFilter = filter;
+            
+            // Atualizar botões
+            document.querySelectorAll('.toggle-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            document.getElementById(`btn-${filter}`).classList.add('active');
+            
+            applyFilters();
+        }
+
+        function applyFilters() {
+            const searchTerm = document.getElementById('search').value.toLowerCase();
+            const estiloFilter = document.getElementById('estilo').value;
+            const cidadeFilter = document.getElementById('cidade').value;
+
+            filteredArtistas = artistas.filter(artista => {
+                // Filtro principal (todos ou apenas com contato)
+                if (currentFilter === 'contato' && !artista.temContato) {
+                    return false;
+                }
+
+                // Filtro de busca
+                if (searchTerm && !artista.nome.toLowerCase().includes(searchTerm)) {
+                    return false;
+                }
+
+                // Filtro de estilo
+                if (estiloFilter && artista.estilo !== estiloFilter) {
+                    return false;
+                }
+
+                // Filtro de cidade
+                if (cidadeFilter && artista.cidade !== cidadeFilter) {
+                    return false;
+                }
+
+                return true;
+            });
+
+            renderTable();
+            updateStats();
+        }
+
+        function renderTable() {
+            const tbody = document.getElementById('artists-tbody');
+            const noResults = document.getElementById('no-results');
+            
+            if (filteredArtistas.length === 0) {
+                tbody.innerHTML = '';
+                noResults.style.display = 'block';
+                return;
+            }
+
+            noResults.style.display = 'none';
+            
+            tbody.innerHTML = filteredArtistas.map(artista => `
+                <tr>
+                    <td><strong>${artista.nome}</strong></td>
+                    <td>${artista.estilo}</td>
+                    <td>${artista.cidade}</td>
+                    <td>
+                        <a href="https://wa.me/${artista.whatsapp.replace(/\D/g, '')}" 
+                           class="whatsapp-link" target="_blank">
+                            ${artista.whatsapp}
+                        </a>
+                    </td>
+                    <td>
+                        <a href="https://instagram.com/${artista.instagram.replace('@', '')}" 
+                           class="instagram-link" target="_blank">
+                            ${artista.instagram}
+                        </a>
+                    </td>
+                    <td>
+                        <span class="status-badge ${artista.temContato ? 'status-contato' : 'status-novo'}">
+                            ${artista.temContato ? 'Em Contato' : 'Novo'}
+                        </span>
+                    </td>
+                    <td>${artista.ultimaInteracao}</td>
+                </tr>
+            `).join('');
+        }
+
+        function updateStats() {
+            const totalArtistas = artistas.length;
+            const comContato = artistas.filter(a => a.temContato).length;
+            const artistasVisiveis = filteredArtistas.length;
+
+            document.getElementById('total-artistas').textContent = totalArtistas;
+            document.getElementById('com-contato').textContent = comContato;
+            document.getElementById('artistas-visiveis').textContent = artistasVisiveis;
+        }
+    </script>
+</body>
+</html>
