@@ -22,6 +22,9 @@ class EstiloMusical(str, Enum):
     JAZZ = "jazz"
     BLUES = "blues"
     REGGAE = "reggae"
+    SAMBA = "samba"
+    PAGODE = "pagode"
+    INDIE = "indie"
     OUTRO = "outro"
 
 
@@ -65,6 +68,13 @@ class Artista(BaseModel):
     biografia: Optional[str] = Field(None, max_length=500)
     experiencia_anos: Optional[int] = Field(None, ge=0, le=50)
     
+    @validator('estilo_musical', pre=True)
+    def normalize_estilo_musical(cls, v):
+        if isinstance(v, str):
+            return v.lower()
+        return v
+
+
     class Config:
         use_enum_values = True
 
@@ -106,25 +116,7 @@ class RespostaTwiML(BaseModel):
 </Response>"""
 
 
-class DadosExtraidos(BaseModel):
-    """Schema para dados extraídos pelo LLM"""
-    nome: Optional[str] = None
-    cidade: Optional[str] = None
-    estilo_musical: Optional[str] = None
-    instagram: Optional[str] = None
-    youtube: Optional[str] = None
-    spotify: Optional[str] = None
-    biografia: Optional[str] = None
-    experiencia_anos: Optional[int] = None
-    confianca: float = 0.0  # Nível de confiança na extração (0-1)
-    
-    @validator('experiencia_anos')
-    def validar_experiencia(cls, v):
-        if v is not None and (v < 0 or v > 50):
-            raise ValueError("Experiência deve estar entre 0 e 50 anos")
-        return v
-    
-
+# Removida definição duplicada de DadosExtraidos - usar apenas a definição abaixo
 
 class DadosExtraidos(BaseModel):
     """Schema para os dados estruturados extraídos pelo LLM a partir da mensagem do usuário."""

@@ -30,6 +30,11 @@ def normalizar_telefone(telefone: str) -> str:
     return telefone_limpo
 
 
+def limpar_telefone(telefone: str) -> str:
+    """Alias para normalizar_telefone - remove prefixo whatsapp e limpa o número"""
+    return normalizar_telefone(telefone)
+
+
 def validar_url(url: str) -> bool:
     """Valida se uma string é uma URL válida"""
     try:

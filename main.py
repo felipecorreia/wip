@@ -8,6 +8,7 @@ from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
+import html
 
 # Carregar variáveis de ambiente
 load_dotenv()
@@ -15,10 +16,9 @@ load_dotenv()
 # Imports locais
 from src.schemas import EstadoConversa, MensagemWhatsApp, RespostaTwiML
 from src.database import SupabaseManager
-from src.flow import processar_fluxo_artista
+from src.flow import processar_mensagem, processar_mensagem_sync, AgentState
 from src.conversation_utils import reiniciar_conversa, obter_progresso_conversa
-from src.flow_direct import processar_mensagem_otimizado
-from src.utils import obter_twilio_manager
+from src.utils import obter_twilio_manager, limpar_telefone
 from src.observability import (
     inicializar_observabilidade, 
     metricas_bot, 
@@ -28,7 +28,6 @@ from src.observability import (
 from src.queue_manager import message_queue
 from src.llm_config import EnhancedLLMConfig
 from src.llm_analyzer import analisar_mensagem_llm, AnaliseIntent
-from src.flow_unified import processar_mensagem_unificada, get_estatisticas_estados
 
 # Configurar logging
 logging.basicConfig(
@@ -36,6 +35,72 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+def _parse_and_validate_request(form_data: dict) -> tuple[str, str]:
+    """Extrai e valida os dados do webhook do Twilio."""
+    telefone = form_data.get("From", "")
+    mensagem = form_data.get("Body", "").strip()
+    
+    if not telefone or not mensagem:
+        raise ValueError("Telefone ou mensagem ausentes no payload do webhook.")
+    
+    telefone_limpo = limpar_telefone(telefone)
+    logger.info(f"Webhook recebido - {telefone_limpo}: {mensagem[:50]}...")
+    return telefone_limpo, mensagem
+
+async def _get_bot_response(telefone: str, mensagem: str, estado: EstadoConversa) -> str:
+    """Processa a mensagem e retorna a resposta do bot, tratando comandos especiais."""
+    if mensagem.lower() in ["/reiniciar", "/restart", "reiniciar"]:
+        # A função reiniciar_conversa já salva o estado, então não precisamos fazer de novo.
+        reiniciar_conversa(telefone, SupabaseManager()) 
+        return "Conversa reiniciada! Vamos começar do zero. Me conte sobre você ou sua banda!"
+    
+    if mensagem.lower() in ["/status", "status"]:
+        progresso = obter_progresso_conversa(estado)
+        return (
+            f" Status do seu cadastro:\n"
+            f"• Progresso: {progresso['progresso_percentual']}%\n"
+            f"• Etapa: {progresso['etapa_atual']}\n"
+            f"• Tentativas: {progresso['tentativas']}"
+        )
+    
+    # Processamento principal com LangGraph
+    try:
+        timeout = float(os.getenv("WEBHOOK_TIMEOUT", "11.0"))
+        return await asyncio.wait_for(
+            processar_mensagem(telefone, mensagem, estado),
+            timeout=timeout
+        )
+    except asyncio.TimeoutError:
+        logger.warning(f"Timeout no processamento para {telefone}")
+        return "Opa, muitas mensagens chegando por aqui hoje. Me perdi um pouco, pode repetir sua mensagem?"
+    except Exception as e:
+        logger.error(f"Erro no processamento da mensagem para {telefone}: {e}", exc_info=True)
+        return "Tive um probleminha por aqui. Pode tentar novamente?"
+
+def _save_conversation_history(supabase: SupabaseManager, estado: EstadoConversa, mensagem_usuario: str, resposta_bot: str):
+    """Salva o histórico da conversa no banco de dados."""
+    if not estado.artista_id:
+        return # Não faz nada se não houver um artista associado
+
+    try:
+        # Salva a mensagem do usuário
+        supabase.salvar_conversa(
+            artista_id=str(estado.artista_id),
+            mensagem=mensagem_usuario,
+            direcao="usuario"
+        )
+        # Salva a resposta do bot
+        supabase.salvar_conversa(
+            artista_id=str(estado.artista_id),
+            mensagem=resposta_bot,
+            direcao="bot"
+        )
+    except Exception as e:
+        logger.warning(f"Erro ao salvar histórico da conversa para o artista {estado.artista_id}: {e}", exc_info=True)
+
+
 
 
 @asynccontextmanager
@@ -74,7 +139,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="WIP Artista Bot",
     description="Sistema de cadastro de artistas via WhatsApp com LLM e LangGraph",
-    version="1.0.0",
+    version="2.0.0",  # Atualizado para versão 2.0 com flow unificado
     lifespan=lifespan
 )
 
@@ -101,7 +166,7 @@ def obter_supabase() -> SupabaseManager:
 
 def obter_estado_conversa(telefone: str, supabase: SupabaseManager) -> EstadoConversa:
     """Obtém ou cria estado da conversa"""
-    telefone_limpo = telefone.replace("whatsapp:", "")
+    telefone_limpo = limpar_telefone(telefone)
     
     # Tentar carregar do cache em memória
     if telefone_limpo in estados_conversa:
@@ -121,7 +186,7 @@ def obter_estado_conversa(telefone: str, supabase: SupabaseManager) -> EstadoCon
 
 def salvar_estado_conversa(telefone: str, estado: EstadoConversa, supabase: SupabaseManager):
     """Salva estado da conversa"""
-    telefone_limpo = telefone.replace("whatsapp:", "")
+    telefone_limpo = limpar_telefone(telefone)
     estados_conversa[telefone_limpo] = estado
     
     # Salvar no banco em background
@@ -131,230 +196,56 @@ def salvar_estado_conversa(telefone: str, estado: EstadoConversa, supabase: Supa
         logger.warning(f"Erro ao persistir estado da conversa: {str(e)}")
 
 
-# Legacy function - now handled by queue_manager
-# Keeping for backward compatibility during transition
-async def processar_mensagem_background(
-    telefone: str,
-    mensagem: str,
-    supabase: SupabaseManager
-):
-    """Processa mensagem em background e envia resposta via Twilio API"""
-    start_time = time.time()
-    
-    try:
-        logger.info(f"Iniciando processamento em background para {telefone}: {mensagem[:100]}")
-        
-        # Obter estado da conversa
-        estado = obter_estado_conversa(telefone, supabase)
-        
-        # Comandos especiais
-        if mensagem.lower() in ["/reiniciar", "/restart", "reiniciar"]:
-            estado = reiniciar_conversa(telefone, supabase)
-            resposta = "Conversa reiniciada! Vamos começar seu cadastro do zero. Qual é o seu nome ou nome da sua banda?"
-        elif mensagem.lower() in ["/status", "status"]:
-            progresso = obter_progresso_conversa(estado)
-            resposta = f"Status do seu cadastro:\n- Progresso: {progresso['progresso_percentual']}%\n- Etapa atual: {progresso['etapa_atual']}\n- Tentativas: {progresso['tentativas']}"
-        else:
-            # Processar mensagem através do fluxo otimizado
-            resposta = await processar_mensagem_otimizado(telefone, mensagem, estado, supabase)
-        
-        # Salvar estado atualizado
-        salvar_estado_conversa(telefone, estado, supabase)
-        
-        # Enviar resposta via Twilio API
-        twilio_manager = obter_twilio_manager()
-        resultado_envio = await twilio_manager.enviar_mensagem_whatsapp(telefone, resposta)
-        
-        if resultado_envio["success"]:
-            logger.info(f"Resposta enviada com sucesso para {telefone} - SID: {resultado_envio['message_sid']}")
-        else:
-            logger.error(f"Falha ao enviar resposta para {telefone}: {resultado_envio['error']}")
-            
-            # Registrar erro de envio
-            metricas_bot.registrar_erro_sistema(
-                tipo_erro="twilio_send_failed",
-                mensagem_erro=resultado_envio['error'],
-                contexto={"telefone": telefone, "tentativas": resultado_envio.get('tentativas', 0)}
-            )
-        
-        # Registrar métricas de sucesso
-        tempo_resposta = time.time() - start_time
-        metricas_bot.registrar_interacao(
-            telefone=telefone,
-            etapa=estado.etapa_atual,
-            sucesso=resultado_envio["success"],
-            dados_coletados=estado.dados_coletados,
-            tempo_resposta=tempo_resposta
-        )
-        
-        # Salvar conversa no banco
-        if estado.artista_id:
-            try:
-                supabase.salvar_conversa(
-                    artista_id=str(estado.artista_id),
-                    mensagem=mensagem,
-                    direcao="entrada"
-                )
-                supabase.salvar_conversa(
-                    artista_id=str(estado.artista_id),
-                    mensagem=resposta,
-                    direcao="saida"
-                )
-            except Exception as e:
-                logger.warning(f"Erro ao salvar conversa no banco: {str(e)}")
-        
-        logger.info(f"Processamento em background concluído para {telefone} em {tempo_resposta:.3f}s")
-        
-    except Exception as e:
-        tempo_resposta = time.time() - start_time
-        logger.error(f"Erro no processamento em background para {telefone}: {str(e)}")
-        
-        # Registrar erro
-        metricas_bot.registrar_erro_sistema(
-            tipo_erro="background_processing",
-            mensagem_erro=str(e),
-            contexto={"telefone": telefone, "tempo_resposta": tempo_resposta}
-        )
-        
-        # Tentar enviar mensagem de erro para o usuário
-        try:
-            twilio_manager = obter_twilio_manager()
-            mensagem_erro = "Desculpe, ocorreu um problema técnico. Tente novamente em alguns instantes."
-            await twilio_manager.enviar_mensagem_whatsapp(telefone, mensagem_erro)
-        except Exception as send_error:
-            logger.error(f"Falha ao enviar mensagem de erro para {telefone}: {str(send_error)}")
-    
-    except:
-        # Log final para casos extremos
-        logger.critical(f"Erro crítico no processamento em background para {telefone}")
-        raise
-
-
 @app.post("/webhook/whatsapp")
 async def webhook_whatsapp(
     request: Request,
     supabase: SupabaseManager = Depends(obter_supabase)
-):
-    """Direct webhook processing - returns actual LLM response"""
+    ):
+    """Webhook principal do WhatsApp, agora refatorado para clareza."""
     start_time = time.time()
-    telefone = ""
+    telefone, mensagem = "", ""
     
     try:
-        # Fast form parsing
         form_data = await request.form()
-        form_dict = dict(form_data)
+        telefone, mensagem = _parse_and_validate_request(dict(form_data))
         
-        # Quick validation
-        telefone = form_dict.get("From", "")
-        mensagem = form_dict.get("Body", "").strip()
-        
-        if not telefone or not mensagem:
-            raise HTTPException(status_code=400, detail="Telefone ou mensagem em branco")
-        
-        # Clean phone number
-        telefone_limpo = telefone.replace("whatsapp:", "")
-        
-        logger.info(f"Webhook recebido - {telefone_limpo}: {mensagem[:50]}...")
-        
-        # Get conversation state
         estado = obter_estado_conversa(telefone, supabase)
+        resposta = await _get_bot_response(telefone, mensagem, estado)
         
-        # Process message directly with optimized flow
-        try:
-            # Check feature flag for unified flow
-            use_unified_flow = os.getenv("USE_UNIFIED_FLOW", "false").lower() == "true"
-            
-            if use_unified_flow:
-                # Use new unified flow with LLM analysis
-                logger.info(f"Using unified flow for {telefone_limpo}")
-                timeout_seconds = 10.0  # Reasonable timeout for LLM
-                resposta_real = await asyncio.wait_for(
-                    processar_mensagem_unificada(telefone, mensagem, supabase),
-                    timeout=timeout_seconds
-                )
-            else:
-                # Check if it's an existing user first (quick check)
-                artista_existente = supabase.buscar_artista_por_telefone(telefone_limpo)
-                
-                if artista_existente:
-                    # Use shorter timeout for existing users (should be instant)
-                    timeout_seconds = 3.0
-                    logger.info(f"Existing artist detected: {artista_existente.nome}, using fast timeout")
-                else:
-                    # New users might need more time
-                    timeout_seconds = 13.0  # Slightly less than Twilio's 15s limit
-                    logger.info("New user detected, using standard timeout")
-                
-                # Use optimized flow that decides between direct response or LangGraph
-                resposta_real = await asyncio.wait_for(
-                    processar_mensagem_otimizado(telefone, mensagem, estado, supabase),
-                    timeout=timeout_seconds
-                )
-            logger.info(f"Response obtained in time: {resposta_real[:100]}...")
-        except asyncio.TimeoutError:
-            logger.warning(f"Processing timeout for {telefone_limpo} after {timeout_seconds}s")
-            resposta_real = "Desculpe, estou com uma lentidão momentânea. Pode repetir sua mensagem?"
-        except asyncio.CancelledError:
-            logger.warning(f"Processing cancelled for {telefone_limpo}")
-            resposta_real = "Processamento interrompido. Por favor, tente novamente."
-        
-        # Save updated state
+        # Salva o estado e o histórico (aqui usamos a nova função corrigida)
         salvar_estado_conversa(telefone, estado, supabase)
+        _save_conversation_history(supabase, estado, mensagem, resposta)
         
-        # Escape special XML characters
-        import html
-        resposta_escaped = html.escape(resposta_real)
+        # Gera a resposta TwiML
+        response_xml = f"""<?xml version="1.0" encoding="UTF-8"?><Response><Message>{html.escape(resposta)}</Message></Response>"""
         
-        # Generate TwiML response with ACTUAL LLM content
-        response_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-    <Message>{resposta_escaped}</Message>
-</Response>"""
-        
-        # Log response time
-        tempo_resposta = time.time() - start_time
-        logger.info(f"Real LLM response sent to {telefone_limpo} in {tempo_resposta:.3f}s")
-        
-        # Record webhook performance metric
+        # Registra métricas de sucesso
         metricas_bot.registrar_interacao(
-            telefone=telefone_limpo,
+            telefone=telefone,
             etapa=estado.etapa_atual,
             sucesso=True,
             dados_coletados=estado.dados_coletados,
-            tempo_resposta=tempo_resposta
+            tempo_resposta=(time.time() - start_time)
         )
         
-        return Response(
-            content=response_xml,
-            media_type="application/xml",
-            status_code=200
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        tempo_resposta = time.time() - start_time
-        logger.error(f"Webhook error: {str(e)} in {tempo_resposta:.3f}s")
-        
-        # Record error metric
-        metricas_bot.registrar_erro_sistema(
-            tipo_erro="webhook_error",
-            mensagem_erro=str(e),
-            contexto={"telefone": telefone, "tempo_resposta": tempo_resposta}
-        )
-        
-        # Fast error response
-        error_xml = """<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-    <Message>Desculpe, ocorreu um problema técnico. Tente novamente em alguns instantes.</Message>
-</Response>"""
-        
-        return Response(
-            content=error_xml,
-            media_type="application/xml",
-            status_code=200
-        )
+        return Response(content=response_xml, media_type="application/xml")
 
+    except ValueError as e: # Erro de validação dos dados de entrada
+        logger.warning(f"Erro de validação no webhook: {e}")
+        return Response(content='<?xml version="1.0" encoding="UTF-8"?><Response></Response>', media_type="application/xml")
+        
+    except Exception as e: # Erro geral não esperado
+        tempo_resposta = time.time() - start_time
+        logger.error(f"Erro fatal no webhook para o telefone '{telefone}': {e} em {tempo_resposta:.3f}s", exc_info=True)
+        
+        metricas_bot.registrar_erro_sistema(
+            tipo_erro="webhook_fatal_error",
+            mensagem_erro=str(e),
+            contexto={"telefone": telefone}
+        )
+        
+        error_xml = """<?xml version="1.0" encoding="UTF-8"?><Response><Message>Desculpe, ocorreu um problema técnico. Tente novamente em alguns instantes.</Message></Response>"""
+        return Response(content=error_xml, media_type="application/xml")
 
 
 @app.get("/health")
@@ -370,7 +261,8 @@ async def health_check():
         return {
             "status": "healthy",
             "service": "wip-artista-bot",
-            "version": "1.0.0",
+            "version": "2.0.0",
+            "flow": "unified_langgraph",
             "database": "connected",
             "observability": observabilidade_status,
             "timestamp": time.time()
@@ -394,12 +286,8 @@ async def get_metrics():
         relatorio["sistema"] = {
             "conversas_ativas": len(estados_conversa),
             "observabilidade_ativa": metricas_bot.client is not None,
-            "fluxo_unificado_ativo": os.getenv("USE_UNIFIED_FLOW", "false").lower() == "true"
+            "flow_version": "2.0_unified_langgraph"
         }
-        
-        # Adicionar estatísticas do fluxo unificado se ativo
-        if os.getenv("USE_UNIFIED_FLOW", "false").lower() == "true":
-            relatorio["fluxo_unificado"] = get_estatisticas_estados()
         
         # Adicionar métricas da queue
         relatorio["queue"] = message_queue.get_stats()
@@ -437,7 +325,8 @@ async def reiniciar_conversa_endpoint(
 ):
     """Reinicia uma conversa específica"""
     try:
-        estado = reiniciar_conversa(telefone, supabase)
+        telefone_limpo = limpar_telefone(telefone)
+        estado = reiniciar_conversa(telefone_limpo, supabase)
         return {
             "telefone": telefone,
             "status": "reiniciada",
@@ -507,7 +396,7 @@ async def llm_status():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# Endpoint para testar análise LLM (FASE 1)
+# Endpoint para testar análise LLM
 @app.post("/test/analyze")
 async def test_analyze_message(
     mensagem: str = Form(...),
@@ -567,105 +456,29 @@ async def test_analyze_message(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# Endpoint para testar múltiplas mensagens de uma vez
-@app.post("/test/analyze/batch")
-async def test_analyze_batch(
-    mensagens: List[str] = Form(...),
-):
-    """
-    Testa análise de múltiplas mensagens para validar consistência
-    
-    Exemplo:
-    curl -X POST http://localhost:8000/test/analyze/batch \
-        -d "mensagens=Oi" \
-        -d "mensagens=Sou a banda Rock Total" \
-        -d "mensagens=Queremos tocar sexta"
-    """
-    try:
-        resultados = []
-        
-        for mensagem in mensagens:
-            analise = await analisar_mensagem_llm(mensagem)
-            resultados.append({
-                "mensagem": mensagem,
-                "intencao": analise.intencao.value,
-                "confianca": analise.confianca,
-                "entidades": analise.entidades.model_dump(exclude_unset=True)
-            })
-        
-        return {
-            "total_mensagens": len(mensagens),
-            "resultados": resultados
-        }
-    except Exception as e:
-        logger.error(f"Erro no teste batch: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# Endpoint para testar fluxo unificado (FASE 2)
-@app.post("/test/unified")
-async def test_unified_flow(
-    telefone: str = Form(...),
-    mensagem: str = Form(...),
-    supabase: SupabaseManager = Depends(obter_supabase)
-):
-    """
-    Endpoint para testar fluxo unificado com análise LLM
-    
-    Exemplos de uso:
-    curl -X POST http://localhost:8000/test/unified \
-        -d "telefone=+5511999999999" \
-        -d "mensagem=Oi, sou João da banda Rock Total de Campinas"
-    """
-    try:
-        # Forçar uso do fluxo unificado
-        resposta = await processar_mensagem_unificada(telefone, mensagem, supabase)
-        
-        # Buscar análise para debug
-        from src.flow_unified import get_estado_usuario
-        estado = get_estado_usuario(telefone)
-        
-        return {
-            "telefone": telefone,
-            "mensagem": mensagem,
-            "resposta": resposta,
-            "debug": {
-                "ultima_intencao": estado.ultima_intencao,
-                "dados_coletados": estado.dados_coletados,
-                "aguardando_resposta": estado.aguardando_resposta,
-                "historico_size": len(estado.historico)
-            }
-        }
-    except Exception as e:
-        logger.error(f"Erro no teste do fluxo unificado: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# Endpoint para testes (remover em produção)
+# Endpoint para testes do novo flow unificado
 @app.post("/test/message")
 async def test_message(
-    # Diga explicitamente ao FastAPI para esperar 'telefone' e 'mensagem'
-    # como campos de um formulário no corpo da requisição.
     telefone: str = Form(...),
     mensagem: str = Form(...),
     supabase: SupabaseManager = Depends(obter_supabase)
 ):
-    """Endpoint para testar processamento de mensagens"""
+    """Endpoint para testar processamento de mensagens com o novo flow unificado"""
     try:
-        # O resto da função não precisa de nenhuma alteração
-        estado = obter_estado_conversa(telefone, supabase)
-        # A sua chamada para processar_fluxo_artista foi removida no refactoring do flow.py
-        # Vamos usar a função correta que está no seu webhook, a processar_mensagem_otimizado
-        # ou a processar_fluxo_artista se quiser testar o LangGraph diretamente.
-        # Vamos usar processar_fluxo_artista para forçar o teste do LangGraph.
-        resposta = await processar_fluxo_artista(telefone, mensagem, estado)
-        salvar_estado_conversa(telefone, estado, supabase)
+        telefone_limpo = limpar_telefone(telefone)
+        estado = obter_estado_conversa(telefone_limpo, supabase)
+        
+        # Usar o novo flow unificado
+        resposta = await processar_mensagem(telefone_limpo, mensagem, estado)
+        
+        salvar_estado_conversa(telefone_limpo, estado, supabase)
         
         return {
             "telefone": telefone,
             "mensagem_enviada": mensagem,
             "resposta_bot": resposta,
-            "estado_atual": estado.model_dump() # Usando o método atualizado do Pydantic
+            "estado_atual": estado.model_dump(),
+            "flow_version": "2.0_unified_langgraph"
         }
     except Exception as e:
         logger.error(f"Erro no teste de mensagem: {str(e)}", exc_info=True)
@@ -680,6 +493,7 @@ if __name__ == "__main__":
     port = int(os.getenv("API_PORT", 8000))
     
     logger.info(f"Iniciando servidor em {host}:{port}")
+    logger.info("Usando flow unificado LangGraph v2.0")
     
     uvicorn.run(
         "main:app",

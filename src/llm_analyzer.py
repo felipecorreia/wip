@@ -58,12 +58,12 @@ class Urgencia(str, Enum):
 # Schemas Pydantic
 class EntidadesExtraidas(BaseModel):
     """Entidades extraídas da mensagem"""
-    nome: Optional[str] = Field(None, description="Nome do artista ou banda")
-    estilo_musical: Optional[str] = Field(None, description="Estilo musical mencionado")
-    cidade: Optional[str] = Field(None, description="Cidade de origem")
-    instagram: Optional[str] = Field(None, description="Link ou usuário do Instagram")
-    youtube: Optional[str] = Field(None, description="Link ou canal do YouTube")
-    spotify: Optional[str] = Field(None, description="Link do Spotify")
+    nome: Optional[str] = Field(None, description="Nome do artista ou banda mencionado")
+    estilo_musical: Optional[str] = Field(None, description="Estilo musical mencionado (rock, jazz, mpb, etc)")
+    cidade: Optional[str] = Field(None, description="Cidade de origem mencionada")
+    instagram: Optional[str] = Field(None, description="@usuario ou link do Instagram se mencionado (ex: @fug_jazz)")
+    youtube: Optional[str] = Field(None, description="@usuario, canal ou link do YouTube se mencionado (ex: @fug_jazz)")
+    spotify: Optional[str] = Field(None, description="Link do Spotify se mencionado")
     data_show: Optional[str] = Field(None, description="Data mencionada para show")
     horario: Optional[str] = Field(None, description="Horário mencionado")
     telefone_adicional: Optional[str] = Field(None, description="Telefone adicional mencionado")
@@ -187,9 +187,13 @@ ANALISE a mensagem e classifique:
 
 2. ENTIDADES - Extraia APENAS o que está explícito na mensagem:
    - Nome da banda/artista
-   - Estilo musical
+   - Estilo musical  
    - Cidade
-   - Links de redes sociais
+   - Instagram: @usuario ou links (ex: @fug_jazz, instagram.com/banda)
+   - YouTube: @usuario, canal ou links (ex: @fug_jazz, youtube.com/banda)
+   - Spotify: links do artista ou @usuario ou (ex: @fug_jazz, spotify.com/banda))
+   - IMPORTANTE: Se o usuário mencionar "meu instagram é @xyz" ou "youtube e instagram são @xyz" ou "minhas redes são @xyz", 
+     extraia @xyz para AMBOS os campos se mencionados
    - Datas mencionadas
    - Contatos adicionais
 
@@ -216,7 +220,7 @@ ANALISE a mensagem e classifique:
    - 0.0 a 1.0 baseado em quão clara é a intenção
 
 IMPORTANTE:
-- Se a mensagem mencionar "tocar", "apresentar", "show" mas o usuário NÃO está cadastrado, classifique como cadastro_inicial
+- Se a mensagem mencionar "tocar", "apresentar", "mostrar", "show" mas o usuário NÃO está cadastrado, classifique como cadastro_inicial
 - Se já está cadastrado e menciona essas palavras, classifique como consulta_agenda
 - Saudações no início de uma apresentação devem ser classificadas como cadastro_inicial, não saudacao
 - Seja preciso: não invente informações que não estão na mensagem
